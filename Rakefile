@@ -5,10 +5,15 @@ require 'twitter/json_stream'
 require 'vendor/em-couchdb/lib/em-couchdb'
 require 'rake'
 require "twitter-text"
+require "twitter"
+require "couchrest"
+require "couchrest_model"
 include Twitter::Extractor
 
-settings = YAML::load( File.open( 'settings.yml' ) )
+require './models/mention.rb'
+require './models/user.rb'
 
+settings = YAML::load( File.open( 'settings.yml' ) )
 namespace :tweets do
 
 	desc "Collects JSON tweets from the Twitter Streaming API, and stores the mentions on CouchDB"
@@ -16,18 +21,18 @@ namespace :tweets do
 		EventMachine::run {
 		  stream = Twitter::JSONStream.connect(
 		    :path    => "/1/statuses/filter.json?track=#{settings["twitter"]["track_word"]}",
-		    :auth    => "#{settings["twitter"]["username"]}:#{settings["twitter"]["password"]}'
+		    :auth    => "#{settings["twitter"]["username"]}:#{settings["twitter"]["password"]}"
 		  )
 		  couch = EventMachine::Protocols::CouchDB.connect :host => 'localhost', :port => 5984, :database => 'twitter-stream'
 		  stream.each_item do |item|
 			begin
-				# we parse the tweet, extract the mentions and store them
 				tweet = JSON.parse item
 				usernames = extract_mentioned_screen_names(tweet["text"])
 				extract_reply_screen_name(tweet["text"]) do |user|
 					usernames << user
 				end
 				unless usernames.empty? 
+				puts "#{Time.now} #{usernames.length} mentions accepted"
 					couch.save('tweets2', JSON.parse(item)) do end
 					usernames.each do |user|
 						couch.save('mentions', :user => user, :created_at => tweet["created_at"]) do end
@@ -40,5 +45,77 @@ namespace :tweets do
 		}
 	end
 
+	desc "Calculates accelerations for previous hour and stores them on users profile"
+	task :summarize do 
+			
+		# time_query = Time.now.strftime("%Y %b %d %H")
+		time_query = "2010 Dec 08 20"
+		puts "Looking for mentions on #{time_query}"
 
+		mentions =  Mention.view "by_hour", :key => time_query, :raw => true
+	
+		users = {}
+		total_mentions = mentions.length
+
+		#we group the mentions by each user
+		mentions["rows"].each do |mention|	
+			user = mention["value"].downcase
+			users[user] ||= User.find "u_#{user}"
+			users[user] ||= User.new :_id => "u_#{user}", :nickname => user
+			users[user].reports << UserReport.new
+			users[user].reports.last.time = time_query
+			users[user].reports.last.mentions ||= 0
+			users[user].reports.last.mentions += 1
+		end
+
+		#we calculate aceleration, obtain the user, calculate velocity and store the info
+				
+		puts "sorting users"
+
+		# Now we get a list of users sorted by the number of mentions
+		top_users = {}
+		users.each do |user, info|
+			n_mentions = info.reports.last.mentions
+			top_users[n_mentions] ||= []
+			top_users[n_mentions] << user
+		end
+
+		puts "Getting Twitter Info"
+
+		# Now we get the followers number for the most mentioned users
+		api_requests = 0
+		begin
+			top_users.sort.reverse.first(2).each do |mentions, mentioned_users|
+				mentioned_users.each do |user|
+					begin
+						puts "Retrieving info for #{user}"
+						users[user].profiles << Twitter::Client.new.user(user)
+						users[user].profiles.last[:time] = time_query
+					rescue Twitter::NotFound => ex
+						puts "User not found: #{ex}"
+					end
+				end
+			end
+		rescue	Exception => ex
+			puts "Twitter API LIMIT exceeded #{ex}"
+		end
+		puts "saving"
+		i=0
+		users.sort.each do |user, info|
+			i += 1
+			#puts "saving #{i} '#{user}'"
+			info.save
+		end
+				
+	end
+
+	task :test do
+		
+		EventMachine.run {
+			couch = EventMachine::Protocols::CouchDB.connect :host => 'localhost', :port => 5984
+			user = Twitter::Client.new.user("brenes")
+			puts user
+			couch.save "users", {:current_profile => JSON.parse(user.to_json), :followers => user.followers_count} do end }
+	
+	end
 end
