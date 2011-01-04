@@ -8,6 +8,7 @@ require "twitter-text"
 require "twitter"
 require "couchrest"
 require "couchrest_model"
+require "hoptoad_notifier"
 include Twitter::Extractor
 
 require './models/mention.rb'
@@ -15,10 +16,17 @@ require './models/user.rb'
 require './models/period_report.rb'
 
 settings = YAML::load( File.open( 'settings.yml' ) )
+
+HoptoadNotifier.configure do |config|
+  config.api_key = settings["hoptoad"]["api_key"] 
+end
+
 namespace :tweets do
 
 	desc "Collects JSON tweets from the Twitter Streaming API, and stores the mentions on CouchDB"
-	task :collect do 
+	task :collect do
+
+	begin  
 		EventMachine::run {
 		  stream = Twitter::JSONStream.connect(
 		    :path    => "/1/statuses/filter.json?track=#{settings["twitter"]["track_word"]}",
@@ -44,11 +52,14 @@ namespace :tweets do
 			end
 		  end
 		}
+	rescue Exception => ex
+		hoptoad_notify "An error has happened while gathering tweets: #{ex}"
+	end
 	end
 
 	desc "Calculates accelerations for previous hour and stores them on users profile"
 	task :summarize do 
-			
+	begin		
 		# time_query = Time.now.strftime("%Y %b %d %H")
 		time_query = "2010 Dec 08 20"
 		puts "Looking for mentions on #{time_query}"
@@ -108,6 +119,7 @@ namespace :tweets do
 			end
 		rescue	Exception => ex
 			puts "Twitter API LIMIT exceeded #{ex}"
+			raise ex
 		end
 
 		puts "Computing velocity"
@@ -157,8 +169,9 @@ namespace :tweets do
 		period_report.save
 
 		users.each { |user, info| info.save }
-
-		
-				
+	rescue Exception => ex
+		hoptoad_notify "An error has happened while summarizing mentions: #{ex}"
+		raise ex				
+	end
 	end
 end
