@@ -56,15 +56,19 @@ namespace :tweets do
 	
 		users = {}
 		total_mentions = mentions.length
+		followers = 0
+		users_with_followers = 0
 
 		#we group the mentions by each user
 		mentions["rows"].each do |mention|	
 			user = mention["value"].downcase
 			users[user] ||= User.find "u_#{user}"
 			users[user] ||= User.new :_id => "u_#{user}", :nickname => user
-			users[user].reports << UserReport.new
-			users[user].reports.last.time = time_query
-			users[user].reports.last.mentions ||= 0
+			unless  not(users[user].reports.last.blank?) and users[user].reports.last.time == time_query
+				users[user].reports << UserReport.new
+				users[user].reports.last.time = time_query
+				users[user].reports.last.mentions ||= 0
+			end
 			users[user].reports.last.mentions += 1
 		end
 
@@ -88,9 +92,15 @@ namespace :tweets do
 			top_users.sort.reverse.first(2).each do |mentions, mentioned_users|
 				mentioned_users.each do |user|
 					begin
-						puts "Retrieving info for #{user}"
-						users[user].profiles << Twitter::Client.new.user(user)
-						users[user].profiles.last[:time] = time_query
+						unless not(users[user].profiles.last.blank?) and users[user].profiles.last[:time] == time_query
+							puts "Retrieving info for #{user}"
+							twitter_profile = Twitter::Client.new.user(user)
+							puts JSON.parse(twitter_profile.to_json).class
+							users[user].profiles << JSON.parse(twitter_profile.to_json)
+							users[user].profiles.last[:time] = time_query
+						end
+						followers += users[user].profiles.last["followers_count"] 
+						users_with_followers += 1
 					rescue Twitter::NotFound => ex
 						puts "User not found: #{ex}"
 					end
@@ -99,13 +109,38 @@ namespace :tweets do
 		rescue	Exception => ex
 			puts "Twitter API LIMIT exceeded #{ex}"
 		end
-		puts "saving"
-		i=0
-		users.sort.each do |user, info|
-			i += 1
-			#puts "saving #{i} '#{user}'"
-			info.save
+
+		put "Computing velocity"
+
+		# Now, with twitter info we shoud be able to compute Phi. We need:
+		# The average number of mentions per hour (for now, the mentions in this period)
+		average_mentions = total_mentions
+		# Number of users
+		total_users = users.length
+		# The average number of followers for a user (taken from the profiles just collected)
+		average_followers = followers / users_with_followers.to_f
+		
+		phi = (average_mentions / total_users) / Math.log(average_followers)
+
+		# And now we compute the velocity for all the users
+
+		speedy_users = {}
+		users.each do |user, profile|
+			report = profile.reports.last
+			previous_report = profile.reports[-2]
+			report.acceleration = (report.mentions / ( report.followers || average_followers)) - phi
+			report.velocity = (previous_report.blank? ? 0 : previous_report.velocity) + report.acceleration
+
+			speedy_users[report.velocity] ||= []
+			speedy_users[report.velocity] << user
+
 		end
+
+		
+		puts "saving"
+		users.each { |user, info| info.save }
+
+		
 				
 	end
 
