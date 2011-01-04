@@ -12,6 +12,7 @@ include Twitter::Extractor
 
 require './models/mention.rb'
 require './models/user.rb'
+require './models/period_report.rb'
 
 settings = YAML::load( File.open( 'settings.yml' ) )
 namespace :tweets do
@@ -55,7 +56,7 @@ namespace :tweets do
 		mentions =  Mention.view "by_hour", :key => time_query, :raw => true
 	
 		users = {}
-		total_mentions = mentions.length
+		total_mentions = mentions["rows"].length
 		followers = 0
 		users_with_followers = 0
 
@@ -95,7 +96,6 @@ namespace :tweets do
 						unless not(users[user].profiles.last.blank?) and users[user].profiles.last[:time] == time_query
 							puts "Retrieving info for #{user}"
 							twitter_profile = Twitter::Client.new.user(user)
-							puts JSON.parse(twitter_profile.to_json).class
 							users[user].profiles << JSON.parse(twitter_profile.to_json)
 							users[user].profiles.last[:time] = time_query
 						end
@@ -110,7 +110,7 @@ namespace :tweets do
 			puts "Twitter API LIMIT exceeded #{ex}"
 		end
 
-		put "Computing velocity"
+		puts "Computing velocity"
 
 		# Now, with twitter info we shoud be able to compute Phi. We need:
 		# The average number of mentions per hour (for now, the mentions in this period)
@@ -119,38 +119,46 @@ namespace :tweets do
 		total_users = users.length
 		# The average number of followers for a user (taken from the profiles just collected)
 		average_followers = followers / users_with_followers.to_f
+		phi = (average_mentions / total_users) / average_followers
 		
-		phi = (average_mentions / total_users) / Math.log(average_followers)
+		puts "mentions: #{average_mentions}"
+		puts "users: #{total_users}"
+		puts "followers: #{average_followers}"
+		puts "phi: #{phi}" 	
 
 		# And now we compute the velocity for all the users
 
-		speedy_users = {}
+		accelerated_users = {}
+		total_acceleration = 0
+		total_velocity = 0
+
 		users.each do |user, profile|
 			report = profile.reports.last
 			previous_report = profile.reports[-2]
-			report.acceleration = (report.mentions / ( report.followers || average_followers)) - phi
-			report.velocity = (previous_report.blank? ? 0 : previous_report.velocity) + report.acceleration
+			followers = (report.followers == 0) ? average_followers : report.followers
 
-			speedy_users[report.velocity] ||= []
-			speedy_users[report.velocity] << user
+			report.acceleration = (report.mentions / followers.to_f) - phi
+			total_acceleration += report.acceleration
+			report.velocity = (previous_report.blank? ? 0 : previous_report.velocity) + report.acceleration
+			total_velocity += report.velocity
+
+			accelerated_users[report.acceleration] ||= []
+			accelerated_users[report.acceleration] << user
 
 		end
-
-		
 		puts "saving"
+
+		period_report = PeriodReport.find(time_query) || PeriodReport.new(:_id => time_query)
+		period_report.mentions = total_mentions
+		period_report.average_followers =  average_followers
+		period_report.average_acceleration = total_acceleration / users.length
+		period_report.average_velocity = total_velocity / users.length
+		period_report.sorted_users = accelerated_users.sort.reverse.map{|acceleration, a_users| a_users}.flatten
+		period_report.save
+
 		users.each { |user, info| info.save }
 
 		
 				
-	end
-
-	task :test do
-		
-		EventMachine.run {
-			couch = EventMachine::Protocols::CouchDB.connect :host => 'localhost', :port => 5984
-			user = Twitter::Client.new.user("brenes")
-			puts user
-			couch.save "users", {:current_profile => JSON.parse(user.to_json), :followers => user.followers_count} do end }
-	
 	end
 end
