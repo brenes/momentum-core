@@ -69,8 +69,8 @@ namespace :tweets do
 	desc "Calculates accelerations for previous hour and stores them on users profile"
 	task :summarize do 
 	begin		
-		# time_query = Time.now.strftime("%Y %b %d %H")
-		time_query = "2010 Dec 08 20"
+		time_query = 1.hour.ago.strftime("%Y %b %d %H")
+		#time_query = "2010 Dec 08 20"
 		puts "Looking for mentions on #{time_query}"
 
 		mentions =  Mention.view "by_hour", :key => time_query, :raw => true
