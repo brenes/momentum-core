@@ -1,5 +1,5 @@
 twitter:
-  user: #twitter username
+  username: #twitter username
   password: #twitter password
   track_word: @ # We track '@' so we can receive all the mentions to usernames among many other things
 hoptoad:
