@@ -110,7 +110,7 @@ namespace :tweets do
 		# Now we get the followers number for the most mentioned users
 		api_requests = 0
 		begin
-			top_users.sort.reverse.first(2).each do |mentions, mentioned_users|
+			top_users.sort.reverse.each do |mentions, mentioned_users|
 				mentioned_users.each do |user|
 					begin
 						unless not(users[user].profiles.last.blank?) and users[user].profiles.last[:time] == time_query
