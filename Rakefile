@@ -51,9 +51,18 @@ namespace :tweets do
 				puts "NO JSON: #{ex}"
 			end
 		  end
+  
+		stream.on_error do |message|
+  			notify_hoptoad Exception.new("Streaming API Error: #{message}")
+		end
+
+  		stream.on_max_reconnects do |timeout, retries|
+			notify_hoptoad Exception.new("Max Reconnects Error: #{message}")
+
+  		end
 		}
 	rescue Exception => ex
-		hoptoad_notify "An error has happened while gathering tweets: #{ex}"
+		notify_hoptoad ex
 	end
 	end
 
@@ -118,8 +127,7 @@ namespace :tweets do
 				end
 			end
 		rescue	Exception => ex
-			puts "Twitter API LIMIT exceeded #{ex}"
-			raise ex
+			puts "Twitter API LIMIT exceeded #{ex}"			
 		end
 
 		puts "Computing velocity"
@@ -170,7 +178,7 @@ namespace :tweets do
 
 		users.each { |user, info| info.save }
 	rescue Exception => ex
-		hoptoad_notify "An error has happened while summarizing mentions: #{ex}"
+		notify_hoptoad ex
 		raise ex				
 	end
 	end
