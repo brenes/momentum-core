@@ -53,16 +53,16 @@ namespace :tweets do
 		  end
   
 		stream.on_error do |message|
-  			notify_hoptoad Exception.new("Streaming API Error: #{message}")
+  			HoptoadNotifier.notify Exception.new("Streaming API Error: #{message}")
 		end
 
   		stream.on_max_reconnects do |timeout, retries|
-			notify_hoptoad Exception.new("Max Reconnects Error: #{message}")
+			HoptoadNotifier.notify Exception.new("Max Reconnects Error: #{message}")
 
   		end
 		}
 	rescue Exception => ex
-		notify_hoptoad ex
+		HoptoadNotifier.notify ex
 	end
 	end
 
@@ -178,7 +178,7 @@ namespace :tweets do
 
 		users.each { |user, info| info.save }
 	rescue Exception => ex
-		notify_hoptoad ex
+		HoptoadNotifier.notify ex
 		raise ex				
 	end
 	end
