@@ -4,14 +4,12 @@ require 'time'
 require 'twitter/json_stream'
 require 'vendor/em-couchdb/lib/em-couchdb'
 require 'rake'
-require "twitter-text"
 require "twitter"
 require "couchrest"
 require "couchrest_model"
 require "hoptoad_notifier"
-include Twitter::Extractor
 
-require './models/mention.rb'
+require './models/tweet.rb'
 require './models/user.rb'
 require './models/period_report.rb'
 
@@ -35,17 +33,11 @@ namespace :tweets do
 		  couch = EventMachine::Protocols::CouchDB.connect :host => 'localhost', :port => 5984, :database => 'twitter-stream'
 		  stream.each_item do |item|
 			begin
-				tweet = JSON.parse item
-				usernames = extract_mentioned_screen_names(tweet["text"])
-				extract_reply_screen_name(tweet["text"]) do |user|
-					usernames << user
-				end
+				tweet = Tweet.from_hash JSON.parse(item)
+				usernames = tweet.mentioned_users
 				unless usernames.empty? 
 				puts "#{Time.now} #{usernames.length} mentions accepted"
-					couch.save('tweets2', JSON.parse(item)) do end
-					usernames.each do |user|
-						couch.save('mentions', :user => user, :created_at => tweet["created_at"]) do end
-					end
+					couch.save('tweets', tweet.to_json_object) do end
 				end
 			rescue Exception => ex
 				puts "NO JSON: #{ex}"
@@ -70,27 +62,31 @@ namespace :tweets do
 	task :summarize do 
 	begin		
 		time_query = 1.hour.ago.strftime("%Y %b %d %H")
+		#time_query = Time.now.strftime("%Y %b %d %H")
 		#time_query = "2010 Dec 08 20"
 		puts "Looking for mentions on #{time_query}"
 
-		mentions =  Mention.view "by_hour", :key => time_query, :raw => true
+		tweets =  Tweet.view "by_hour", :key => time_query
 	
 		users = {}
-		total_mentions = mentions["rows"].length
+		total_mentions = 0
 		followers = 0
 		users_with_followers = 0
 
 		#we group the mentions by each user
-		mentions["rows"].each do |mention|	
-			user = mention["value"].downcase
-			users[user] ||= User.find "u_#{user}"
-			users[user] ||= User.new :_id => "u_#{user}", :nickname => user
-			unless  not(users[user].reports.last.blank?) and users[user].reports.last.time == time_query
-				users[user].reports << UserReport.new
-				users[user].reports.last.time = time_query
-				users[user].reports.last.mentions ||= 0
+		tweets.each do |tweet|	
+			mentioned_users = tweet.mentioned_users
+			total_mentions += mentioned_users.length
+			mentioned_users.each do |user|
+				users[user] ||= User.find "u_#{user}"
+				users[user] ||= User.new :_id => "u_#{user}", :nickname => user
+				unless  not(users[user].reports.last.blank?) and users[user].reports.last.time == time_query
+					users[user].reports << UserReport.new
+					users[user].reports.last.time = time_query
+					users[user].reports.last.mentions ||= 0
+				end
+				users[user].reports.last.mentions += 1
 			end
-			users[user].reports.last.mentions += 1
 		end
 
 		#we calculate aceleration, obtain the user, calculate velocity and store the info
