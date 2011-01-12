@@ -159,7 +159,7 @@ namespace :tweets do
 			total_velocity += report.velocity
 
 			accelerated_users[report.acceleration] ||= []
-			accelerated_users[report.acceleration] << user
+			accelerated_users[report.acceleration] << {:username => user, :report => report}
 
 		end
 		puts "saving"
