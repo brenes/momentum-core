@@ -6,7 +6,7 @@ class User < CouchRest::Model::Base
 
   	property :nick
   	property :velocity
-	property :reports, [UserReport]
-	property :profiles, [Hash]
+	property :reports, [Hash]
+	property :profile, Hash
 
 end

@@ -64,6 +64,8 @@ namespace :tweets do
 		time_query = 1.hour.ago.strftime("%Y %b %d %H")
 		#time_query = Time.now.strftime("%Y %b %d %H")
 		#time_query = "2010 Dec 08 20"
+		time_key = 1.hour.ago.strftime("%Y%m%d%H")
+
 		puts "Looking for mentions on #{time_query}"
 
 		tweets =  Tweet.view "by_hour", :key => time_query
@@ -80,12 +82,10 @@ namespace :tweets do
 			mentioned_users.each do |user|
 				users[user] ||= User.find "u_#{user}"
 				users[user] ||= User.new :_id => "u_#{user}", :nickname => user
-				unless  not(users[user].reports.last.blank?) and users[user].reports.last.time == time_query
-					users[user].reports << UserReport.new
-					users[user].reports.last.time = time_query
-					users[user].reports.last.mentions ||= 0
+				if users[user].reports[time_query].blank?
+					users[user].reports[time_key] = UserReport.new :time => time_key
 				end
-				users[user].reports.last.mentions += 1
+				users[user].reports[time_key].mentions += 1
 			end
 		end
 
@@ -96,7 +96,7 @@ namespace :tweets do
 		# Now we get a list of users sorted by the number of mentions
 		top_users = {}
 		users.each do |user, info|
-			n_mentions = info.reports.last.mentions
+			n_mentions = info.reports[time_key].mentions
 			top_users[n_mentions] ||= []
 			top_users[n_mentions] << user
 		end
@@ -109,13 +109,13 @@ namespace :tweets do
 			top_users.sort.reverse.each do |mentions, mentioned_users|
 				mentioned_users.each do |user|
 					begin
-						unless not(users[user].profiles.last.blank?) and users[user].profiles.last[:time] == time_query
+						if users[user].profile.blank?
 							puts "Retrieving info for #{user}"
 							twitter_profile = Twitter::Client.new.user(user)
 							users[user].profiles << JSON.parse(twitter_profile.to_json)
 							users[user].profiles.last[:time] = time_query
 						end
-						followers += users[user].profiles.last["followers_count"] 
+						followers += users[user].profile["followers_count"] 
 						users_with_followers += 1
 					rescue Twitter::NotFound => ex
 						puts "User not found: #{ex}"
@@ -149,14 +149,22 @@ namespace :tweets do
 		total_velocity = 0
 
 		users.each do |user, profile|
-			report = profile.reports.last
-			previous_report = profile.reports[-2]
-			followers = (report.followers == 0) ? average_followers : report.followers
+			report = profile.reports[time_key]
+			previous_time_key = profile.reports.keys.select{|k| k < time_key}.last
+			previous_report = unless previous_time_key.blank?
+				profile.reports[previous_time_key]
+			end
+
+			followers = (profile.profile["followers_count"] == 0) ? average_followers : profile.profile["followers_count"]
 
 			report.acceleration = (report.mentions / followers.to_f) - phi
 			total_acceleration += report.acceleration
+			
 			report.velocity = (previous_report.blank? ? 0 : previous_report.velocity) + report.acceleration
 			total_velocity += report.velocity
+
+			past_report = profile.reports[2.hour.ago.strftime("%Y%m%d%H")].
+			report.previous_ranking = past_report.ranking unless  past_report.blank?
 
 			accelerated_users[report.acceleration] ||= []
 			accelerated_users[report.acceleration] << {:username => user, :report => report}
@@ -164,7 +172,7 @@ namespace :tweets do
 		end
 		puts "saving"
 
-		period_report = PeriodReport.find(time_query) || PeriodReport.new(:_id => time_query)
+		period_report = PeriodReport.find(time_query) || PeriodReport.new(:_id => time_query, :time => time_query)
 		period_report.mentions = total_mentions
 		period_report.average_followers =  average_followers
 		period_report.average_acceleration = total_acceleration / users.length
@@ -172,7 +180,15 @@ namespace :tweets do
 		period_report.sorted_users = accelerated_users.sort.reverse.map{|acceleration, a_users| a_users}.flatten
 		period_report.save
 
-		users.each { |user, info| info.save }
+		users.each do |user, info| 
+			report = info.reports[time_key]
+			accelerations = accelerated_users.keys.select{|a| a < report.acceleration}
+			report.ranking = 1
+			accelerations.each do |a|
+				report.ranking += accelerated_users[a].length
+			end
+			info.save 
+		end
 	rescue Exception => ex
 		HoptoadNotifier.notify ex
 		raise ex				
