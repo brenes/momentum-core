@@ -82,7 +82,8 @@ namespace :tweets do
 			mentioned_users.each do |user|
 				users[user] ||= User.find "u_#{user}"
 				users[user] ||= User.new :_id => "u_#{user}", :nickname => user
-				if users[user].reports[time_query].blank?
+				users[user].reports ||= {}
+				if users[user].reports[time_key].blank?
 					users[user].reports[time_key] = UserReport.new :time => time_key
 				end
 				users[user].reports[time_key].mentions += 1
