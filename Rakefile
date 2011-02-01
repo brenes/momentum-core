@@ -2,7 +2,7 @@ $KCODE = "u"
 require 'rubygems'
 require 'time'
 require 'twitter/json_stream'
-require 'vendor/em-couchdb/lib/em-couchdb'
+require './vendor/em-couchdb/lib/em-couchdb'
 require 'rake'
 require "twitter"
 require "couchrest"

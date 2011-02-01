@@ -1,4 +1,4 @@
-require 'models/user_report'
+require './models/user_report'
 
 class User < CouchRest::Model::Base
 
