@@ -1,8 +1,7 @@
-$KCODE = "u"
 require 'rubygems'
 require 'time'
 require 'twitter/json_stream'
-require './vendor/em-couchdb/lib/em-couchdb'
+require './vendor/em-couchdb/lib/em-couchdb.rb'
 require 'rake'
 require "twitter"
 require "couchrest"
@@ -84,9 +83,12 @@ namespace :tweets do
 				users[user] ||= User.new :_id => "u_#{user}", :nickname => user
 				users[user].reports ||= {}
 				if users[user].reports[time_key].blank?
-					users[user].reports[time_key] = UserReport.new :time => time_key
+					users[user].reports[time_key] = Hash.new 
+					users[user].reports[time_key][:time] = time_key
+					users[user].reports[time_key][:mentions] = 0
 				end
-				users[user].reports[time_key].mentions += 1
+				users[user].reports[time_key][:mentions] ||= 0
+				users[user].reports[time_key][:mentions] += 1
 			end
 		end
 
@@ -97,7 +99,7 @@ namespace :tweets do
 		# Now we get a list of users sorted by the number of mentions
 		top_users = {}
 		users.each do |user, info|
-			n_mentions = info.reports[time_key].mentions
+			n_mentions = info.reports[time_key][:mentions]
 			top_users[n_mentions] ||= []
 			top_users[n_mentions] << user
 		end
@@ -109,12 +111,20 @@ namespace :tweets do
 		begin
 			top_users.sort.reverse.each do |mentions, mentioned_users|
 				mentioned_users.each do |user|
+                               		unless users[user].profile.blank?
+                                                puts "Not retrieving info for #{user}"
+                                                followers += users[user].profile["followers_count"]
+                                                users_with_followers += 1
+					end
+                                end
+				mentioned_users.each do |user|
 					begin
 						if users[user].profile.blank?
 							puts "Retrieving info for #{user}"
-							twitter_profile = Twitter::Client.new.user(user)
-							users[user].profiles << JSON.parse(twitter_profile.to_json)
-							users[user].profiles.last[:time] = time_query
+							twitter_profile = Twitter::Client.new.user(user.dup)
+							users[user].profile = JSON.parse(twitter_profile.to_json)
+							users[user].profile[:time] = time_query
+							users[user].save
 						end
 						followers += users[user].profile["followers_count"] 
 						users_with_followers += 1
@@ -155,20 +165,20 @@ namespace :tweets do
 			previous_report = unless previous_time_key.blank?
 				profile.reports[previous_time_key]
 			end
+			puts previous_report.inspect
+			followers = (profile.profile.blank? or profile.profile["followers_count"] == 0) ? average_followers : profile.profile["followers_count"]
 
-			followers = (profile.profile["followers_count"] == 0) ? average_followers : profile.profile["followers_count"]
-
-			report.acceleration = (report.mentions / followers.to_f) - phi
-			total_acceleration += report.acceleration
+			report[:acceleration] = (report[:mentions] / followers.to_f) - phi
+			total_acceleration += report[:acceleration]
 			
-			report.velocity = (previous_report.blank? ? 0 : previous_report.velocity) + report.acceleration
-			total_velocity += report.velocity
+			report[:velocity] = (previous_report.blank? ? 0 : previous_report[:velocity]||0) + (report[:acceleration] || 0)
+			total_velocity += report[:velocity]
 
 			past_report = profile.reports[2.hour.ago.strftime("%Y%m%d%H")].
-			report.previous_ranking = past_report.ranking unless  past_report.blank?
+			report[:previous_ranking] = past_report[:ranking] unless  past_report.blank?
 
-			accelerated_users[report.acceleration] ||= []
-			accelerated_users[report.acceleration] << {:username => user, :report => report}
+			accelerated_users[report[:acceleration]] ||= []
+			accelerated_users[report[:acceleration]] << {:username => user, :report => report}
 
 		end
 		puts "saving"
@@ -183,10 +193,10 @@ namespace :tweets do
 
 		users.each do |user, info| 
 			report = info.reports[time_key]
-			accelerations = accelerated_users.keys.select{|a| a < report.acceleration}
-			report.ranking = 1
+			accelerations = accelerated_users.keys.select{|a| a > report[:acceleration]}
+			report[:ranking] = 1
 			accelerations.each do |a|
-				report.ranking += accelerated_users[a].length
+				report[:ranking] += accelerated_users[a].length
 			end
 			info.save 
 		end
