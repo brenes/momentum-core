@@ -1,3 +1,4 @@
+$KCODE = "u"
 require 'rubygems'
 require 'time'
 require 'twitter/json_stream'
@@ -7,6 +8,7 @@ require "twitter"
 require "couchrest"
 require "couchrest_model"
 require "hoptoad_notifier"
+require "right_aws"
 
 require './models/tweet.rb'
 require './models/user.rb'
@@ -204,5 +206,33 @@ namespace :tweets do
 		HoptoadNotifier.notify ex
 		raise ex				
 	end
+	end
+
+	desc "Saves tweets from the previous day and upload them as a JSON File to Amazon S3"
+	task :archive do
+
+		s3 = RightAws::S3.new settings["aws"]["access_key_id"],  settings["aws"]["access_key_secret"]
+		
+		backup_bucket = s3.bucket settings["aws"]["s3"]["backup_bucket"]
+		
+		720.times do |i|
+			
+			time_key = (24+i).hour.ago.strftime("%Y %b %d %H") #"2011 Feb 01 19"
+
+			puts "Getting tweets for #{time_key}"
+
+			tweets =  Tweet.view "by_hour", :key => time_key
+
+			unless tweets.blank?
+				puts "Putting #{tweets.length} tweets to S3 (#{i.hour.ago.strftime("%Y%m%d%H")})"
+				backup_bucket.put((24+i).hour.ago.strftime("%Y%m%d%H"), tweets.to_json)
+	
+				puts "Clearing tweets"
+				tweets.each do |t| t.destroy end
+
+			end
+
+			puts "Done"
+		end
 	end
 end

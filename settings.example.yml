@@ -4,3 +4,8 @@ twitter:
   track_word: @ # We track '@' so we can receive all the mentions to usernames among many other things
 hoptoad:
   api_key: # This project has lot of background processes so some notification service such as Hoptoad is extremely useful
+aws: # As we may have space problems due to the big amount of tweets we may find useful to archive them in Amazon S3 so we could reuse them later
+  access_key_id: # Access Key Id from AWS
+  access_key_secret: # Access Key Secret from AWS
+  s3:
+    backup_bucket: # The name of the buket in Amazon S3 where we are going to store the tweets
