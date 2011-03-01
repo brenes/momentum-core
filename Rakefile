@@ -208,27 +208,26 @@ namespace :tweets do
 	end
 	end
 
-	desc "Saves tweets from the previous day and upload them as a JSON File to Amazon S3"
+	desc "Saves tweets from the previous 30 days as a set of JSON files"
 	task :archive do
 
-		s3 = RightAws::S3.new settings["aws"]["access_key_id"],  settings["aws"]["access_key_secret"]
-		
-		backup_bucket = s3.bucket settings["aws"]["s3"]["backup_bucket"]
-		
 		720.times do |i|
-			
-			time_key = (24+i).hour.ago.strftime("%Y %b %d %H") #"2011 Feb 01 19"
+			lag = settings["archive"]["lag"]
+
+			time_key = (lag+i).hour.ago.strftime("%Y %b %d %H") #"2011 Feb 01 19"
 
 			puts "Getting tweets for #{time_key}"
 
 			tweets =  Tweet.view "by_hour", :key => time_key
 
+			puts "#{tweets.length} tweets"
 			unless tweets.blank?
-				puts "Putting #{tweets.length} tweets to S3 (#{i.hour.ago.strftime("%Y%m%d%H")})"
-				backup_bucket.put((24+i).hour.ago.strftime("%Y%m%d%H"), tweets.to_json)
-	
+				puts "Archiving #{tweets.length} tweets (#{(lag+i).hour.ago.strftime("%Y%m%d%H")})"
+				File.open("#{settings["archive"]["tweets_folder"]}/#{(lag+i).hour.ago.strftime("%Y%m%d%H")}", 'w') {|f| f.write(tweets.to_json) }	
 				puts "Clearing tweets"
-				tweets.each do |t| t.destroy end
+				tweets.each do |t| 
+						t.destroy 
+				end
 
 			end
 
