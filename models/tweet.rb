@@ -10,7 +10,7 @@ class Tweet < CouchRest::Model::Base
 		property p.to_sym
 	end	
 
-	view_by :hour, :map => "function(doc) { emit(doc.created_at.substr(26,4) + ' ' + doc.created_at.substr(4,9), doc); }"
+	view_by :hour, :map => "function(doc) { if (doc.created_at) {emit(doc.created_at.substr(26,4) + ' ' + doc.created_at.substr(4,9), doc); }}"
 
 	def self.from_hash hash
 		Tweet.new hash.slice(*@@properties).merge(:from_screen_name => hash["user"]["screen_name"])
