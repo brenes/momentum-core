@@ -37,11 +37,11 @@ namespace :tweets do
 				tweet = Tweet.from_hash JSON.parse(item)
 				usernames = tweet.mentioned_users
 				unless usernames.empty? 
-				puts "#{Time.now} #{usernames.length} mentions accepted"
 					couch.save('tweets', tweet.to_json_object) do end
 				end
 			rescue Exception => ex
 				puts "NO JSON: #{ex}"
+				HoptoadNotifier.notify
 			end
 		  end
   
@@ -167,7 +167,6 @@ namespace :tweets do
 			previous_report = unless previous_time_key.blank?
 				profile.reports[previous_time_key]
 			end
-			puts previous_report.inspect
 			followers = (profile.profile.blank? or profile.profile["followers_count"] == 0) ? average_followers : profile.profile["followers_count"]
 
 			report[:acceleration] = (report[:mentions] / followers.to_f) - phi
