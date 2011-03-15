@@ -229,8 +229,17 @@ namespace :tweets do
 				end
 
 			end
-
 			puts "Done"
 		end
+
+			puts "Compacting database"
+			EventMachine::run {
+			  couch = EventMachine::Protocols::CouchDB.connect :host => 'localhost', :port => 5984, :database => 'twitter-stream'
+			  couch.compact("tweets") do
+			  	# Once we have compacted the database we can close the EventMachine loop
+				EventMachine::stop_event_loop
+			  end
+			}
+			
 	end
 end
