@@ -139,6 +139,10 @@ namespace :tweets do
 			puts "Twitter API LIMIT exceeded #{ex}"			
 		end
 
+		if total_mentions == 0
+			puts "No mentions"
+			return;
+		end
 		puts "Computing velocity"
 
 		# Now, with twitter info we shoud be able to compute Phi. We need:
