@@ -29,7 +29,9 @@ namespace :tweets do
 		EventMachine::run {
 		  stream = Twitter::JSONStream.connect(
 		    :path    => "/1/statuses/filter.json?track=#{settings["twitter"]["track_word"]}",
-		    :auth    => "#{settings["twitter"]["username"]}:#{settings["twitter"]["password"]}"
+		    :auth    => "#{settings["twitter"]["username"]}:#{settings["twitter"]["password"]}",
+		    :port           => 443,
+      	:ssl            => true
 		  )
 		  couch = EventMachine::Protocols::CouchDB.connect :host => 'localhost', :port => 5984, :database => 'twitter-stream'
 		  stream.each_item do |item|
@@ -244,6 +246,138 @@ namespace :tweets do
 				EventMachine::stop_event_loop
 			  end
 			}
-			
+
+	end
+
+	desc "Collects tweets and analyzes in realtime the mentions (experimental mode)"
+	task :realtime do
+
+		# This 'Realtime version' has an issue that must be debugged, but could be a first draft version
+		#
+		#   * If a user is mentioned at 9:30 and gets mentioned again at 9:50 we will use data from period (8:00 - 8:59) to calculate phi and thus the acceleration (That's cool)
+		# 	* If it's get mentioned again at 10:10 we will use data from period (9:00-9:59) to calculate the whole phi even if 10 minutes (9:50-9:59) should get calculated using data from previous period (8:00-8:59)
+		# 	* If it's get mentioned again at 12:30 we will use data from period (11:00-11:59) to calculate the whole phi but 50 minutes (10:10-10:59) shold get calculated with data from period (9:00-9:59) and a whole hour (11:00-11:59) with data from period (10:00-10:59)
+		# This is important as not every hour in twitter has the same characteristics (sleep time, working time...)
+
+	begin
+
+
+		EventMachine::run {
+
+		  stream = Twitter::JSONStream.connect(
+		    :path    => "/1/statuses/filter.json?track=#{settings["twitter"]["track_word"]}",
+		    :auth    => "#{settings["twitter"]["username"]}:#{settings["twitter"]["password"]}",
+		    :port           => 443,
+      	:ssl            => true
+		  )
+
+		  couch = EventMachine::Protocols::CouchDB.connect :host => 'localhost', :port => 5984, :database => 'twitter-realtime-stream'
+
+			# On every tweet
+		  stream.each_item do |item|
+			begin
+				tweet = Tweet.from_hash JSON.parse(item)
+				usernames = tweet.mentioned_users
+				unless usernames.empty?
+
+					# We get the previous hourly report to get some variables such as the average number of mentions, followers, etc. and the current one so we fill it
+					current_hour = tweet.created_at.strftime("%Y %b %d %H")
+					previous_hour = (tweet.created_at - 1.hour).strftime("%Y %b %d %H")
+					previous_period_report = PeriodReport.find(previous_hour)
+
+					# Now, with twitter info we shoud be able to compute Phi. We need:
+					# The average number of mentions per hour (for now, the mentions in this period)
+					mentions_per_hour = previous_period_report.mentions
+					# Number of users
+					users_per_hour = previous_period_report.users
+					average_mentions_per_hour = mentions_per_hour / users_per_hour
+					# The average number of followers for a user (taken from the users mentioned in the last period)
+					average_followers = previous_period_report.followers / previous_period_report.users_with_followers
+
+					# Phi is a measure of how easy is to be replied.
+					# If it's too easy (Phi too large because each user got a lot of mentions or had few followers when mentioned) you should have a lot of mentions or few followers to have any merit
+					# If it's too hard (Phi too small because each user got few mentions or had a lot of followers to get the mentions) you could have merit even having less mentions or more followers
+					phi = average_mentions_per_hour / average_followers
+
+					puts "mentions: #{average_mentions}"
+					puts "users: #{total_users}"
+					puts "followers: #{average_followers}"
+					puts "phi: #{phi}"
+
+					# variables to store how must we update the current period
+					followers = 0
+					mentions = usernames.count
+					new_mentioned_users = 0
+					new_users_with_followers = 0
+
+					usernames.each do |username|
+
+						# We get or create the user
+						user = User.find "u_#{username}"
+						user ||= User.new :_id => "u_#{username}", :nickname => username
+
+						# We get its follower number from twitter API if its info is too old
+
+						begin
+							if user.followers.blank?
+								puts "Retrieving info for #{user.nickname}"
+								twitter_profile = Twitter::Client.new.user(user.nickname)
+								twitter_profile = JSON.parse(twitter_profile.to_json)
+								user.followers = twitter_profile["followers_count"]
+							end
+						rescue Twitter::NotFound => ex
+							puts "User not found: #{ex}"
+						end
+
+						first_mention =  user.last_mention_at.strftime("%Y %b %d %H") < current_hour
+
+						# Now let's increment the period variables
+						unless user.followers.nil?
+							followers += user.followers
+							new_mentioned_users += 1 if first_mention
+						end
+
+						new_users_with_followers += 1 if first_mention
+
+						# We compute the new score for the user
+						user_followers = user.followers
+						hours_since_last_mention = (tweet.created_at - user.last_mention_at)/3600.0
+						user.acceleration +=  1/(user_followers * hours_since_last_mention) - phi
+						user.velocity += user.acceleration * hours_since_last_mention
+
+						# And save it
+						user.save
+
+					end
+
+					# We get the current report and save it
+					current_period_report = PeriodReport.find(current_hour) || PeriodReport.new(:_id => time_query, :time => current_hour)
+					current_period_report.mentions += mentions
+					current_period_report.followers += followers
+					current_period_report.users += new_mentioned_users
+					current_period_report.users_with_followers += new_users_with_followers
+
+					current_period_report.save
+					tweet.save
+
+				end
+			rescue Exception => ex
+				puts "NO JSON: #{ex}"
+				HoptoadNotifier.notify
+			end
+		  end
+
+		stream.on_error do |message|
+  			HoptoadNotifier.notify Exception.new("Streaming API Error: #{message}")
+		end
+
+  		stream.on_max_reconnects do |timeout, retries|
+			HoptoadNotifier.notify Exception.new("Max Reconnects Error: #{message}")
+
+  		end
+		}
+	rescue Exception => ex
+		HoptoadNotifier.notify ex
+	end
 	end
 end
